@@ -22,6 +22,7 @@ public abstract class Juego {
 
     public abstract void update(float delta);
 
+
     public Rectangle getBounds(){
         return new Rectangle(x + 5, y +5, width -10, height -10);
     }

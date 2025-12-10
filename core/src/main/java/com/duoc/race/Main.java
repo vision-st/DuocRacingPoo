@@ -9,8 +9,8 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.utils.ScreenUtils;
-
-//import com.duoc.race.model.*;
+import com.duoc.race.interfaces.Chocable;
+import com.duoc.race.model.*;
 
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -31,6 +31,7 @@ public class Main extends ApplicationAdapter {
     private static final float DESPAWN_Y         = -150f;
     private static final int   LEFT_BOUND        = 80;
     private static final int   RIGHT_MARGIN      = 80;
+    // Nuevas constantes para las nubes
     private static final float CLOUD_SPAWN_INTERVAL = 1.8f;
 
     // -------------------------------------------------------------------------
@@ -49,12 +50,14 @@ public class Main extends ApplicationAdapter {
     // -------------------------------------------------------------------------
     // 3. MODELO DEL JUEGO (OBJETOS Y ESTADO)
     // -------------------------------------------------------------------------
-
+    private AutoJugador jugador;
+    private List<Juego> obstaculos;
+    private List<Juego> nubes;    // <-- LISTA DE NUBES DECORATIVAS
 
     private float scrollY        = 0f;
     private float tiempoSpawn    = 0f;
     private float tiempoPuntaje  = 0f;
-    private float tiempoSpawnNube = 0f;
+    private float tiempoSpawnNube = 0f;  // <-- TIMER PARA NUBES
     private int   puntaje        = 0;
     private int   vida           = INITIAL_LIFE;
     private boolean gameOver     = false;
@@ -261,9 +264,19 @@ public class Main extends ApplicationAdapter {
             texEnemigo  = new Texture("car_black_small_5.png");
             texBarrera  = new Texture("barrier_red_race.png");
             texTribuna  = new Texture("tribune_full.png");
-            texNube     = new Texture("cloud.PNG"); //
+            texNube     = new Texture("cloud.PNG"); // <-- Asegúrate de tener este asset
 
-            texPista = new Texture("Road19.jpg");
+            if (Gdx.files.internal("Road19.jpg").exists()) {
+                texPista = new Texture("Road19.jpg");
+            } else {
+                texPista = new Texture(
+                    new com.badlogic.gdx.graphics.Pixmap(
+                        1, 1,
+                        com.badlogic.gdx.graphics.Pixmap.Format.RGB888
+                    )
+                );
+            }
+
             texPista.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
             texTribuna.setWrap(Texture.TextureWrap.Repeat, Texture.TextureWrap.Repeat);
 
@@ -309,7 +322,9 @@ public class Main extends ApplicationAdapter {
      */
     private void initWorld() {
         int centerX = Gdx.graphics.getWidth() / 2 - 30;
-
+        jugador = new AutoJugador(centerX, 50, texJugador);
+        obstaculos = new ArrayList<>();
+        nubes = new ArrayList<>();
         resetGameState();
     }
 
@@ -335,12 +350,13 @@ public class Main extends ApplicationAdapter {
         puntaje = 0;
         tiempoPuntaje = 0;
         tiempoSpawn = 0;
-        tiempoSpawnNube = 0f;
+        tiempoSpawnNube = 0f;   // <-- REINICIAMOS TIMER DE NUBES
         gameOver = false;
-
+        obstaculos.clear();
+        nubes.clear();          // <-- LIMPIAMOS NUBES EXISTENTES
 
         int centerX = Gdx.graphics.getWidth() / 2 - 30;
-
+        jugador.setX(centerX);
     }
 
 // -----------------------------------------------------------------------------
@@ -394,7 +410,17 @@ public class Main extends ApplicationAdapter {
      * @param delta tiempo transcurrido entre frames.
      */
     private void handlePlayerInput(float delta) {
+        if (Gdx.input.isKeyPressed(Input.Keys.LEFT)) {
+            jugador.setX(jugador.getX() - PLAYER_SPEED * delta);
+        }
+        if (Gdx.input.isKeyPressed(Input.Keys.RIGHT)) {
+            jugador.setX(jugador.getX() + PLAYER_SPEED * delta);
+        }
 
+        float minX = LEFT_BOUND;
+        float maxX = Gdx.graphics.getWidth() - RIGHT_MARGIN - jugador.getWidth();
+        float clampedX = MathUtils.clamp(jugador.getX(), minX, maxX);
+        jugador.setX(clampedX);
     }
 
     /**
@@ -420,7 +446,19 @@ public class Main extends ApplicationAdapter {
      * </p>
      */
     private void spawnObstaclesIfNeeded() {
+        if (tiempoSpawn <= SPAWN_INTERVAL) {
+            return;
+        }
 
+        float randomX = MathUtils.random(90, Gdx.graphics.getWidth() - 130);
+
+        if (MathUtils.randomBoolean(0.6f)) {
+            obstaculos.add(new AutoEnemigo(randomX, Gdx.graphics.getHeight(), texEnemigo));
+        } else {
+            obstaculos.add(new Barrera(randomX, Gdx.graphics.getHeight(), texBarrera));
+        }
+
+        tiempoSpawn = 0f;
     }
 
     /**
@@ -449,7 +487,25 @@ public class Main extends ApplicationAdapter {
      * @param delta tiempo transcurrido entre frames.
      */
     private void updateObstaclesAndCollisions(float delta) {
+        Iterator<Juego> iter = obstaculos.iterator();
 
+        while (iter.hasNext()) {
+            Juego obj = iter.next();
+
+            obj.update(delta);
+
+            if (obj.getBounds().overlaps(jugador.getBounds())) {
+                handleCollision(obj);
+                iter.remove();
+                if (gameOver) {
+                    continue;
+                }
+            }
+
+            if (obj.getY() < DESPAWN_Y) {
+                iter.remove();
+            }
+        }
     }
 
     /**
@@ -460,10 +516,22 @@ public class Main extends ApplicationAdapter {
      * Si la vida llega a cero, marca el estado de Game Over.
      * </p>
      *
-     * @param obj el objeto con el que el jugador colisionó. Juego
+     * @param obj el objeto con el que el jugador colisionó.
      */
-    private void handleCollision(Object obj) {
+    private void handleCollision(Juego obj) {
+        if (obj instanceof Chocable) {
+            ((Chocable) obj).chocoEnLaCarrera();
+        }
 
+        if (obj instanceof AutoEnemigo) {
+            vida -= DAMAGE_ENEMY;
+        } else if (obj instanceof Barrera) {
+            vida -= DAMAGE_BARRIER;
+        }
+
+        if (vida <= 0) {
+            gameOver = true;
+        }
     }
 
 // -----------------------------------------------------------------------------
@@ -541,7 +609,7 @@ public class Main extends ApplicationAdapter {
      * Dibuja el auto del jugador en pantalla.
      */
     private void renderPlayer() {
-
+        batch.draw(jugador.texture, jugador.getX(), jugador.getY(), jugador.getWidth(), jugador.getHeight());
     }
 
     /**
@@ -552,7 +620,9 @@ public class Main extends ApplicationAdapter {
      * </p>
      */
     private void renderObstacles() {
-
+        for (Juego obj : obstaculos) {
+            batch.draw(obj.texture, obj.getX(), obj.getY(), obj.getWidth(), obj.getHeight());
+        }
     }
 
     /**
@@ -638,7 +708,7 @@ public class Main extends ApplicationAdapter {
         float randomX = MathUtils.random(0, Gdx.graphics.getWidth() - 150);
         float startY = Gdx.graphics.getHeight() + 50;
 
-
+        nubes.add(new Nube(randomX, startY, texNube));
 
         tiempoSpawnNube = 0f;
     }
@@ -649,7 +719,16 @@ public class Main extends ApplicationAdapter {
      * @param delta tiempo transcurrido entre frames.
      */
     private void updateClouds(float delta) {
+        Iterator<Juego> iter = nubes.iterator();
 
+        while (iter.hasNext()) {
+            Juego nube = iter.next();
+            nube.update(delta);
+
+            if (nube.getY() < DESPAWN_Y) {
+                iter.remove();
+            }
+        }
     }
 
     /**
@@ -659,7 +738,9 @@ public class Main extends ApplicationAdapter {
      * </p>
      */
     private void renderClouds() {
-
+        for (Juego nube : nubes) {
+            batch.draw(nube.texture, nube.getX(), nube.getY(), nube.getWidth(), nube.getHeight());
+        }
     }
 
 
