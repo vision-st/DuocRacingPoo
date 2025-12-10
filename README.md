@@ -69,4 +69,4 @@ Abra una terminal en la carpeta raíz del proyecto y ejecute el siguiente comand
 
 **En Windows:**
 ```bash
-gradlew lwjgl3:run
+./gradlew lwjgl3:run
